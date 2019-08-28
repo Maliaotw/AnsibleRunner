@@ -12,17 +12,7 @@ from ansible.plugins.callback.minimal import CallbackModule as CMDCallBackModule
 
 class CallbackMixin:
     def __init__(self, display=None):
-        # result_raw example: {
-        #   "ok": {"hostname": {"task_name": {}，...},..},
-        #   "failed": {"hostname": {"task_name": {}..}, ..},
-        #   "unreachable: {"hostname": {"task_name": {}, ..}},
-        #   "skipped": {"hostname": {"task_name": {}, ..}, ..},
-        # }
-        # results_summary example: {
-        #   "contacted": {"hostname": {"task_name": {}}, "hostname": {}},
-        #   "dark": {"hostname": {"task_name": {}, "task_name": {}},...,},
-        #   "success": True
-        # }
+
         self.results_raw = dict(
             ok=defaultdict(dict),
             failed=defaultdict(dict),
@@ -60,6 +50,7 @@ class AdHocResultCallback(CallbackMixin, CallbackModule, CMDCallBackModule):
     """
     Task result Callback
     """
+
     def clean_result(self, t, host, task_name, task_result):
         contacted = self.results_summary["contacted"]
         dark = self.results_summary["dark"]
@@ -95,8 +86,8 @@ class AdHocResultCallback(CallbackMixin, CallbackModule, CMDCallBackModule):
 
         if result._task.action in constants.MODULE_NO_JSON:
             CMDCallBackModule.v2_runner_on_failed(self,
-                result, ignore_errors=ignore_errors
-            )
+                                                  result, ignore_errors=ignore_errors
+                                                  )
         else:
             super().v2_runner_on_failed(
                 result, ignore_errors=ignore_errors
@@ -140,10 +131,15 @@ class CommandResultCallback(AdHocResultCallback):
       "delta": 0:0:0.123
     }
     """
+
     def __init__(self, display=None, **kwargs):
 
         self.results_command = dict()
+        self.log = []
+
         super().__init__(display)
+
+        # print('self.foo',self.foo)
 
     def gather_result(self, t, res):
         super().gather_result(t, res)
@@ -154,17 +150,37 @@ class CommandResultCallback(AdHocResultCallback):
         msg = '$ {} ({})'.format(play.name, now)
         self._play = play
         self._display.banner(msg)
+        self.log.append("%s\r\n" % msg)
+
+        # print('self._play.name', self._play.name)
+
+    def v2_runner_on_ok(self, result):
+        print('v2_runner_item_on_ok')
+        self.results_summary['success'] = True
+
+        print(result._result)
+        ret = "%s | CHANGED | rc=%s => \r\n%s\r\n" % (
+            result._host.get_name(), result._result.get("rc"), result._result.get("stdout").replace('\n', '\r\n'))
+
+        self._display.display(ret)
+
+        self.log.append(ret)
+
 
     def v2_runner_on_unreachable(self, result):
         self.results_summary['success'] = False
         self.gather_result("unreachable", result)
         msg = result._result.get("msg")
+
         if not msg:
             msg = json.dumps(result._result, indent=4)
-        self._display.display("%s | FAILED! => \n%s" % (
-            result._host.get_name(),
-            msg,
-        ), color=constants.COLOR_ERROR)
+
+        ret = "%s | FAILED! => \r\n%s\r\n" % (result._host.get_name(), msg,)
+
+        self._display.display(ret, color=constants.COLOR_ERROR)
+
+        self.log.append(ret)
+
 
     def v2_runner_on_failed(self, result, ignore_errors=False):
         self.results_summary['success'] = False
@@ -178,10 +194,14 @@ class CommandResultCallback(AdHocResultCallback):
             msg += '\n' + module_stdout
         if not msg:
             msg = json.dumps(result._result, indent=4)
-        self._display.display("%s | FAILED! => \n%s" % (
-            result._host.get_name(),
-            msg,
-        ), color=constants.COLOR_ERROR)
+
+        ret = "%s | FAILED! => \r\n%s\r\n" % (result._host.get_name(), msg,)
+
+        self._display.display(ret, color=constants.COLOR_ERROR)
+
+        self.log.append(ret)
+
+
 
     def _print_task_banner(self, task):
         pass
@@ -197,103 +217,75 @@ class CommandResultCallback(AdHocResultCallback):
             cmd['delta'] = res._result.get('delta')
         else:
             cmd['err'] = "Error: {}".format(res)
+
         self.results_command[host] = cmd
 
 
-class PlaybookResultCallBack(CallbackBase):
-    """
-    Custom callback model for handlering the output data of
-    execute playbook file,
-    Base on the build-in callback plugins of ansible which named `json`.
-    """
-
-    CALLBACK_VERSION = 2.0
-    CALLBACK_TYPE = 'stdout'
-    CALLBACK_NAME = 'Dict'
-
-    def __init__(self, display=None):
-        super(PlaybookResultCallBack, self).__init__(display)
-        self.results = []
-        self.output = ""
-        self.item_results = {}  # {"host": []}
-
-    def _new_play(self, play):
-        return {
-            'play': {
-                'name': play.name,
-                'id': str(play._uuid)
-            },
-            'tasks': []
-        }
-
-    def _new_task(self, task):
-        return {
-            'task': {
-                'name': task.get_name(),
-            },
-            'hosts': {}
-        }
-
-    def v2_playbook_on_no_hosts_matched(self):
-        self.output = "skipping: No match hosts."
-
-    def v2_playbook_on_no_hosts_remaining(self):
-        pass
-
-    def v2_playbook_on_task_start(self, task, is_conditional):
-        self.results[-1]['tasks'].append(self._new_task(task))
+class CmdRedisResultCallback(CommandResultCallback):
 
     def v2_playbook_on_play_start(self, play):
-        self.results.append(self._new_play(play))
+        super().v2_playbook_on_play_start(play)
+
+    def v2_runner_on_unreachable(self, result):
+        super().v2_runner_on_unreachable(result)
+
+    def v2_runner_on_failed(self, result, ignore_errors=False):
+        super().v2_runner_on_failed(result, ignore_errors=ignore_errors)
+
+
+class PlaybookResultCallBack(CallbackBase):
+    CALLBACK_VERSION = 2.0
+
+    def __init__(self, *args, **kwargs):
+        super(PlaybookResultCallBack, self).__init__(*args, **kwargs)
+        self.task_ok = {}
+        self.task_skipped = {}
+        self.task_failed = {}
+        self.task_status = {}
+        self.task_unreachable = {}
+        self.task_changed = {}
+
+    def v2_playbook_on_start(self, playbook):
+        print("v2_playbook_on_start")
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        print(dir(playbook))
+
+        msg = '$ {} ({})'.format(playbook, now)
+        self._play = playbook
+        self._display.banner(msg)
+        super().v2_playbook_on_start(playbook)
+
+    def v2_runner_on_ok(self, result, *args, **kwargs):
+        self.task_ok[result._host.get_name()] = result
+        self.result = result._result
+        ret = "%s | CHANGED | rc=%s => \r\n%s\r\n" % (
+            result._host.get_name(), result._result.get("rc"), result._result.get("stdout").replace('\n', '\r\n'))
+        self._display.display(ret)
+
+    def v2_runner_on_failed(self, result, *args, **kwargs):
+        self.task_failed[result._host.get_name()] = result
+        print(result._result['msg'])
+
+
+    def v2_runner_on_unreachable(self, result):
+        self.task_unreachable[result._host.get_name()] = result
+
+    def v2_runner_on_skipped(self, result):
+        self.task_skipped[result._host.get_name()] = result
+
+    def v2_runner_on_changed(self, result):
+        self.task_changed[result._host.get_name()] = result
 
     def v2_playbook_on_stats(self, stats):
         hosts = sorted(stats.processed.keys())
-        summary = {}
         for h in hosts:
-            s = stats.summarize(h)
-            summary[h] = s
-
-        if self.output:
-            pass
-        else:
-            self.output = {
-                'plays': self.results,
-                'stats': summary
+            t = stats.summarize(h)
+            self.task_status[h] = {
+                "ok": t['ok'],
+                "changed": t['changed'],
+                "unreachable": t['unreachable'],
+                "skipped": t['skipped'],
+                "failed": t['failures']
             }
-
-    def gather_result(self, res):
-        if res._task.loop and "results" in res._result and res._host.name in self.item_results:
-            res._result.update({"results": self.item_results[res._host.name]})
-            del self.item_results[res._host.name]
-
-        self.results[-1]['tasks'][-1]['hosts'][res._host.name] = res._result
-
-    def v2_runner_on_ok(self, res, **kwargs):
-        if "ansible_facts" in res._result:
-            del res._result["ansible_facts"]
-
-        self.gather_result(res)
-
-    def v2_runner_on_failed(self, res, **kwargs):
-        self.gather_result(res)
-
-    def v2_runner_on_unreachable(self, res, **kwargs):
-        self.gather_result(res)
-
-    def v2_runner_on_skipped(self, res, **kwargs):
-        self.gather_result(res)
-
-    def gather_item_result(self, res):
-        self.item_results.setdefault(res._host.name, []).append(res._result)
-
-    def v2_runner_item_on_ok(self, res):
-        self.gather_item_result(res)
-
-    def v2_runner_item_on_failed(self, res):
-        self.gather_item_result(res)
-
-    def v2_runner_item_on_skipped(self, res):
-        self.gather_item_result(res)
-
-
-
+        # print(self.res)
+        print(self.task_status)

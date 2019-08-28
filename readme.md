@@ -1,24 +1,35 @@
 # AnsibleRunner
 
+拷貝自jumpserver項目
 
-# edit test.runner.py change host info
 
-```
- host_data = [
-            {
-                "hostname": "testserver1",
-                "ip": "192.168.33.101",
-                "port": 22,
-                "username": "maliao",
-                "password": "123456",
-            },
-        ]
+## Runner
+
+Ansible Command Runner
 ```
 
-# run example
+```
+
+Ansible Playbook Runner
+```
 
 ```
-testserver1 | CHANGED | rc=0 >>
-...
 
-```
+## Callback
+
+任務開始
+v2_playbook_on_play_start
+
+任務成功
+v2_runner_on_ok 
+
+無法連接
+v2_runner_on_unreachable 
+
+任務失敗
+v2_runner_on_failed 
+
+
+
+
+

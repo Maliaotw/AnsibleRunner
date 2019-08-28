@@ -1,0 +1,5 @@
+---
+- hosts: localhost
+  tasks:
+    - name: "demo shell"
+      shell: ls

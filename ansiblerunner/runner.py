@@ -11,17 +11,21 @@ from ansible.vars.manager import VariableManager
 from ansible.parsing.dataloader import DataLoader
 from ansible.executor.playbook_executor import PlaybookExecutor
 from ansible.playbook.play import Play
+from ansible.inventory.manager import InventoryManager
 import ansible.constants as C
-
+from src.redisbase import RedisQueue
 from callback import (
-    AdHocResultCallback, PlaybookResultCallBack, CommandResultCallback
+    AdHocResultCallback,
+    PlaybookResultCallBack,
+    CommandResultCallback,
+    CmdRedisResultCallback
 )
 from exceptions import AnsibleError
-
+from option import Option
+from inventory import BaseInventory
 
 __all__ = ["AdHocRunner", "PlayBookRunner", "CommandRunner"]
 C.HOST_KEY_CHECKING = False
-
 
 Options = namedtuple('Options', [
     'listtags', 'listtasks', 'listhosts', 'syntax', 'connection',
@@ -38,7 +42,7 @@ def get_default_options():
         syntax=False,
         timeout=30,
         connection='ssh',
-        forks=10,
+        forks=70,
         remote_user='root',
         private_key_file=None,
         become=None,
@@ -53,8 +57,7 @@ def get_default_options():
     return options
 
 
-# Jumpserver not use playbook
-class PlayBookRunner:
+class PlayBaseRunner:
     """
     用于执行AnsiblePlaybook的接口.简化Playbook对象的使用.
     """
@@ -63,34 +66,27 @@ class PlayBookRunner:
     results_callback_class = PlaybookResultCallBack
     loader_class = DataLoader
     variable_manager_class = VariableManager
-    options = get_default_options()
 
-    def __init__(self, inventory=None, options=None):
-        """
-        :param options: Ansible options like ansible.cfg
-        :param inventory: Ansible inventory
-        """
-        if options:
-            self.options = options
+    def __init__(self, inventory=None, options=None, playbook_path=None):
         C.RETRY_FILES_ENABLED = False
-        self.inventory = inventory
-        self.loader = self.loader_class()
-        self.results_callback = self.results_callback_class()
-        self.playbook_path = options.playbook_path
-        self.variable_manager = self.variable_manager_class(
-            loader=self.loader, inventory=self.inventory
-        )
-        self.passwords = options.passwords
-        self.__check()
 
-    def __check(self):
-        if self.options.playbook_path is None or \
-                not os.path.exists(self.options.playbook_path):
-            raise AnsibleError(
-                "Not Found the playbook file: {}.".format(self.options.playbook_path)
-            )
-        if not self.inventory.list_hosts('all'):
-            raise AnsibleError('Inventory is empty')
+        self.options = options
+        context.CLIARGS = ImmutableDict(self.options)
+        self.loader = self.loader_class()
+        if inventory:
+            self.inventory = inventory
+        else:
+            self.inventory = InventoryManager(self.loader)
+        self.results_callback = self.results_callback_class()
+        self.playbook_path = playbook_path
+        self.variable_manager = self.variable_manager_class(
+            loader=self.loader, inventory=self.inventory,
+
+        )
+        self.passwords = None
+
+    def get_result_callback(self, file_obj=None):
+        return self.__class__.results_callback_class()
 
     def run(self):
         executor = PlaybookExecutor(
@@ -100,13 +96,56 @@ class PlayBookRunner:
             loader=self.loader,
             passwords={"conn_pass": self.passwords}
         )
-        context.CLIARGS = ImmutableDict(self.options)
+
+        self.results_callback = self.get_result_callback()
 
         if executor._tqm:
             executor._tqm._stdout_callback = self.results_callback
         executor.run()
         executor._tqm.cleanup()
-        return self.results_callback.output
+        return executor._tqm._stdout_callback
+
+
+class PlayBookRunner:
+
+    def __init__(self, hostname, path, options={}, inventory=None):
+        self.hostname = hostname
+
+        self.options = self.set_option(options)
+        if inventory:
+            self.inventory = self.set_inventory(**inventory)
+        else:
+            self.inventory = inventory
+        self.path = path
+
+    def set_inventory(self, ip, port, username, password):
+        host_data = [
+            {
+                "hostname": self.hostname,
+                "ip": ip,
+                "port": port,
+                "username": username,
+                "password": password,
+            },
+        ]
+        inventory = BaseInventory(host_data)
+        return inventory
+
+    def set_option(self, options: dict):
+        o = Option()
+        o.set_extra_vars(options)
+        return o.result
+
+    def run(self):
+        prunner = PlayBaseRunner(
+            playbook_path=self.path,
+            options=self.options,
+            inventory=self.inventory
+        )
+
+        ret = prunner.run()
+        print(ret.result)
+        return ret.result
 
 
 class AdHocRunner:
@@ -156,9 +195,9 @@ class AdHocRunner:
             if args.startswith('executable='):
                 _args = args.split(' ')
                 executable, command = _args[0].split('=')[1], ' '.join(_args[1:])
-                args = {'executable': executable, '_raw_params':  command}
+                args = {'executable': executable, '_raw_params': command}
             else:
-                args = {'_raw_params':  args}
+                args = {'_raw_params': args}
             return args
         else:
             return args
@@ -180,7 +219,7 @@ class AdHocRunner:
             _options.update(options)
         return _options
 
-    def run(self, tasks, pattern, play_name='Ansible Ad-hoc', gather_facts='no'):
+    def run(self, tasks, pattern, play_name='Ansible Ad-hoc', gather_facts='no', uuid='uuid'):
         """
         :param tasks: [{'action': {'module': 'shell', 'args': 'ls'}, ...}, ]
         :param pattern: all, *, or others
@@ -190,6 +229,7 @@ class AdHocRunner:
         """
         self.check_pattern(pattern)
         self.results_callback = self.get_result_callback()
+
         cleaned_tasks = self.clean_tasks(tasks)
         context.CLIARGS = ImmutableDict(self.options)
 
@@ -213,6 +253,7 @@ class AdHocRunner:
             stdout_callback=self.results_callback,
             passwords={"conn_pass": self.options.get("password", "")}
         )
+
         try:
             tqm.run(play)
             return self.results_callback
@@ -228,12 +269,11 @@ class CommandRunner(AdHocRunner):
     results_callback_class = CommandResultCallback
     modules_choices = ('shell', 'raw', 'command', 'script')
 
-    def execute(self, cmd, pattern, module='shell'):
+    def execute(self, cmd, pattern, module='shell', uuid='uuid'):
         if module and module not in self.modules_choices:
             raise AnsibleError("Module should in {}".format(self.modules_choices))
 
         tasks = [
             {"action": {"module": module, "args": cmd}}
         ]
-        return self.run(tasks, pattern, play_name=cmd)
-
+        return self.run(tasks, pattern, play_name=cmd, uuid=uuid)
