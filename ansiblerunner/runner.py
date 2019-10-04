@@ -13,7 +13,6 @@ from ansible.executor.playbook_executor import PlaybookExecutor
 from ansible.playbook.play import Play
 from ansible.inventory.manager import InventoryManager
 import ansible.constants as C
-from src.redisbase import RedisQueue
 from callback import (
     AdHocResultCallback,
     PlaybookResultCallBack,
@@ -159,12 +158,23 @@ class AdHocRunner:
     default_options = get_default_options()
     command_modules_choices = ('shell', 'raw', 'command', 'script', 'win_shell')
 
-    def __init__(self, inventory, options=None):
-        self.options = self.update_options(options)
-        self.inventory = inventory
+    def __init__(self, inventory=None, options=None):
+        # self.options = self.update_options(options)
         self.loader = DataLoader()
-        self.variable_manager = VariableManager(
-            loader=self.loader, inventory=self.inventory
+
+        if inventory:
+            self.options = self.update_options(options)
+            self.inventory = BaseInventory(inventory)
+
+        else:
+            self.inventory = InventoryManager(self.loader, sources='localhost,')
+            self.options = self.update_options({
+                "connection":'local'
+            })
+
+        self.variable_manager = self.variable_manager_class(
+            loader=self.loader, inventory=self.inventory,
+
         )
 
     def get_result_callback(self, file_obj=None):
@@ -251,6 +261,7 @@ class AdHocRunner:
             variable_manager=self.variable_manager,
             loader=self.loader,
             stdout_callback=self.results_callback,
+            # passwords=dict(vault_pass='secret'),
             passwords={"conn_pass": self.options.get("password", "")}
         )
 
@@ -269,7 +280,7 @@ class CommandRunner(AdHocRunner):
     results_callback_class = CommandResultCallback
     modules_choices = ('shell', 'raw', 'command', 'script')
 
-    def execute(self, cmd, pattern, module='shell', uuid='uuid'):
+    def execute(self, cmd, pattern='all', module='shell', uuid='uuid'):
         if module and module not in self.modules_choices:
             raise AnsibleError("Module should in {}".format(self.modules_choices))
 
@@ -277,3 +288,5 @@ class CommandRunner(AdHocRunner):
             {"action": {"module": module, "args": cmd}}
         ]
         return self.run(tasks, pattern, play_name=cmd, uuid=uuid)
+
+
