@@ -6,12 +6,34 @@ AnsibleRunner 是一个基于 Ansible API 的 Python 封装库，旨在简化在
 
 ## 环境要求
 
-- Python 3.x
+- Python 3.9
 - Ansible == 2.8.4
 
-## 安装
+## 开发与安装
 
-你可以通过 pip 安装所需的 Ansible 版本：
+本项目使用 [uv](https://github.com/astral-sh/uv) 进行 Python 版本管理和依赖管理。
+
+### 初始化环境
+
+确保已安装 `uv`，然后执行以下命令初始化环境并安装依赖：
+
+```bash
+uv sync
+```
+
+这将自动安装 Python 3.9 和所有必需的依赖项（包括 ansible 2.8.4）。
+
+### 运行测试
+
+使用 `uv run` 运行测试：
+
+```bash
+PYTHONPATH=ansiblerunner uv run pytest
+```
+
+### 手动安装 (不使用 uv)
+
+你也可以通过 pip 手动安装所需的 Ansible 版本：
 
 ```bash
 pip install ansible==2.8.4

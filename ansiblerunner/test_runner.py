@@ -3,6 +3,7 @@
 
 import unittest
 import sys
+import os
 
 # sys.path.insert(0, "../..")
 
@@ -12,6 +13,9 @@ from inventory import BaseInventory
 
 class TestPlaybookRunner(unittest.TestCase):
     def setUp(self):
+        with open('test.yml', 'w') as f:
+            f.write("---\n- hosts: all\n  tasks:\n    - name: test\n      debug:\n        msg: 'Hello World'\n")
+
         self.runner = PlayBookRunner(hostname='maliao-web1', path='test.yml')
         self.runner1 = PlayBookRunner(hostname='maliao-web1', path='test.yml',
                                       options={'newhost': 'maliao-web1', 'memory_mb': 1024, 'size_gb': 30,
@@ -34,14 +38,15 @@ class TestPlaybookRunner(unittest.TestCase):
             },
         ]
 
-        self.runner2 = PlayBookRunner(hostname='maliao-web1', path='test.yml', inventory=hosts)
-        # self.runner.playbook_path =
+        self.runner2 = PlayBookRunner(hostname='maliao-web1', path='test.yml', inventory=hosts[0])
+
+    def tearDown(self):
+        if os.path.exists('test.yml'):
+            os.remove('test.yml')
 
     def test_run(self):
         ret = self.runner.run()
         print(ret)
-        # print(ret.results_summary)
-        # print(ret.results_raw)
 
 
 class TestAdHocRunner(unittest.TestCase):
@@ -55,8 +60,7 @@ class TestAdHocRunner(unittest.TestCase):
                 "password": "123456",
             },
         ]
-        inventory = BaseInventory(host_data)
-        self.runner = AdHocRunner(inventory)
+        self.runner = AdHocRunner(host_data)
 
     def test_run(self):
         tasks = [
@@ -101,15 +105,13 @@ class TestPingRunner(unittest.TestCase):
             },
 
         ]
-        inventory = BaseInventory(host_data)
-        self.runner = CommandRunner(inventory)
+        self.runner = CommandRunner(host_data)
 
     def test_ping(self):
         tasks = [
             {"action": {"module": "ping", "data": "pong"}, "name": "check connect to host"},
         ]
 
-        # ret = self.runner.run(tasks, "all")
         ret = self.runner.run(tasks, "demo*")
         print(ret.results_summary)
         print(ret.results_raw)
@@ -119,8 +121,7 @@ class TestPingRunner(unittest.TestCase):
             {"action": {"module": "shell", "args": "racadm getsysinfo"}, "name": "check connect to host"},
         ]
 
-        # ret = self.runner.run(tasks, "all")
-        ret = self.runner.run(tasks, "esxi1*")
+        ret = self.runner.run(tasks, "demo*")
         print(ret.results_summary)
         print(ret.results_raw)
 
@@ -157,11 +158,9 @@ class TestCommandRunner(unittest.TestCase):
                 "private_key": "/Users/maliao/.ssh/id_rsa",
             },
         ]
-        # inventory = BaseInventory(host_data)
         self.runner = CommandRunner(inventory=host_data)
 
     def test_execute(self):
-        # res = self.runner.execute('ls', 'all')
         res = self.runner.execute(cmd='ls', pattern='all')
         print(res.results_command)
         print(res.results_raw)
