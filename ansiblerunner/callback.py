@@ -244,6 +244,7 @@ class PlaybookResultCallBack(CallbackBase):
         self.task_status = {}
         self.task_unreachable = {}
         self.task_changed = {}
+        self.result = {}
 
     def v2_playbook_on_start(self, playbook):
         print("v2_playbook_on_start")

@@ -117,7 +117,7 @@ class PlayBookRunner:
             self.inventory = inventory
         self.path = path
 
-    def set_inventory(self, ip, port, username, password):
+    def set_inventory(self, ip, port, username, password=None, private_key=None, **kwargs):
         host_data = [
             {
                 "hostname": self.hostname,
@@ -125,6 +125,7 @@ class PlayBookRunner:
                 "port": port,
                 "username": username,
                 "password": password,
+                "private_key": private_key,
             },
         ]
         inventory = BaseInventory(host_data)
